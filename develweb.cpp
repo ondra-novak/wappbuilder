@@ -1,12 +1,9 @@
-//============================================================================
-// Name        : develweb.cpp
-// Author      : 
-// Version     :
-// Copyright   : Your copyright notice
-// Description : Hello World in C, Ansi-style
-//============================================================================
 
-
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -100,12 +97,12 @@ void Builder::build(std::ostream &output) {
 		output << std::endl;
  	}
 	output << "</head><body>";
-	for (auto &&x: scripts) {
-		output << "<script src=\"" << x << "\" type=\"text/javascript\"/></script>" << std::endl;
- 	}
 	for (auto &&x: templates) {
 		includeFile(output, x);
 		output << std::endl;
+ 	}
+	for (auto &&x: scripts) {
+		output << "<script src=\"" << x << "\" type=\"text/javascript\"/></script>" << std::endl;
  	}
 	output << "</body></html>";
 	output << std::endl;
@@ -193,21 +190,31 @@ int main(int argc, char **argv) {
 	std::string collapse_base;
 	std::string dep_file;
 	std::string dep_target;
+	bool nooutput = false;
 
-	std::string x = nextParam(false);
-	while (!x.empty()) {
-		if (x == "-i") infile = nextParam(true);
-		else if (x == "-o") outfile = nextParam(true);
-		else if (x == "-c") collapse_base = nextParam(true);
-		else if (x == "-d") dep_file = nextParam(true);
-		else if (x == "-t") dep_target = nextParam(true);
-		else  {
+	const char *x = nextParam(false);
+	while (x) {
+		if (x[0] == '-' && x[1] != 0 && x[2] == 0) {
+			switch(x[1]) {
+			case 'i':infile = nextParam(true);break;
+			case 'o': outfile = nextParam(true);break;
+			case 'c':collapse_base = nextParam(true);break;
+			case 'd': dep_file = nextParam(true);break;
+			case 't': dep_target = nextParam(true);break;
+			case 'n': nooutput = true;break;
+			case 'D': chdir(nextParam(true));break;
+			default:
+				std::cerr << "Unknown switch " << x << std::endl;
+				return 1;
+			}
+		} else {
 			std::cerr << "Help TODO" << std::endl;
-			return 0;
+			return 1;
 		}
+		x = nextParam(false);
 	}
 
-	if (dep_target.empty()) {
+	if (!dep_file.empty() && dep_target.empty()) {
 		if (outfile.empty()) {
 			std::cerr << "Need specify -o or -t" << std::endl;
 			return 1;
@@ -233,15 +240,18 @@ int main(int argc, char **argv) {
 		builder.collapse_styles(collapse_base+".css");
 	}
 
-	if (outfile.empty()) {
-		builder.build(std::cout);
-	} else {
-		std::ofstream f(outfile, std::ios::out|std::ios::trunc);
-		if (!f) {
-			std::cerr << "Can't write to " << outfile << std::endl;
-			return 2;
+	if (!nooutput) {
+
+		if (outfile.empty()) {
+			builder.build(std::cout);
+		} else {
+			std::ofstream f(outfile, std::ios::out|std::ios::trunc);
+			if (!f) {
+				std::cerr << "Can't write to " << outfile << std::endl;
+				return 2;
+			}
+			builder.build(f);
 		}
-		builder.build(f);
 	}
 
 

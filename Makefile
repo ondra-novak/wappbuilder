@@ -1,4 +1,4 @@
-CXXFLAGS =	-O2 -g -Wall -fmessage-length=0
+CXXFLAGS =	-O0 -g3 -Wall -fmessage-length=0
 
 OBJS =		develweb.o
 
