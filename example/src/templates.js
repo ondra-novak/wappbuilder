@@ -440,5 +440,7 @@ var View = function(){
 	View.prototype.readBasicElement = function(elem) {
 		return elem.innerHTML;		
 	}
+	
+	return View;
 }();
 
