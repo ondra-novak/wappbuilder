@@ -43,7 +43,7 @@ public:
 	void build(std::ostream &output);
 	void collapse_styles(const std::string &outfile);
 	void collapse_scripts(const std::string &outfile);
-	void create_dep_file(const std::string &depfile, const std::string &target);
+	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed);
 	void parse_lang_file(const std::string &langfile);
 
 
@@ -170,15 +170,19 @@ void Builder::collapse_scripts(const std::string& outfile) {
 	collapse(scripts, outfile);
 }
 
-void Builder::create_dep_file(const std::string& depfile, const std::string& target) {
+void Builder::create_dep_file(const std::string& depfile, const std::string& target, bool collapsed) {
 	std::ofstream f(depfile, std::ios::trunc|std::ios::out);
 	if (!f) {
 		std::cerr << "Error writing to file: " << depfile << std::endl;
 	} else {
 		f << target << " " <<  depfile << " :";
-		std::initializer_list<const std::vector<std::string> *> list{
+		std::initializer_list<const std::vector<std::string> *> list_collapsed{
 				&templates, &styles, &scripts, &header,
 		};
+		std::initializer_list<const std::vector<std::string> *> list_debug{
+				&templates, &header,
+		};
+		auto &list=collapsed?list_collapsed:list_debug;
 		for (auto &&y: list ) {
 			for (auto &&x : *y) f << "\\" << std::endl  << x;
 		}
@@ -252,9 +256,10 @@ void Builder::scan_variable(std::istream& in, std::ostream &out) {
 					auto iter = langfile.find(name);
 					if (iter != langfile.end()) {
 						out << iter->second;
-						return;
+					} else {
+						out << name;
 					}
-					i = EOF;
+					return;
 				}
 			}
 		}
@@ -328,7 +333,7 @@ int main(int argc, char **argv) {
 			} else {
 				std::cerr << "Usage: " << std::endl
 						<<std::endl
-						<< "\t" << argc[0] << " <...options...>" <<std::endl
+						<< "\t" << argv[0] << " <...options...>" <<std::endl
 						<<std::endl
 						<< "-i  <file>      read script from the file. If missing, stdin is read" <<std::endl
 						<< "-o  <file>      write result html to the file. If missing, stdout is written unless -n is specified" <<std::endl
@@ -369,7 +374,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (!dep_file.empty()) {
-			builder.create_dep_file(dep_file, dep_target);
+			builder.create_dep_file(dep_file, dep_target, !collapse_base.empty());
 		}
 
 		if (!collapse_base.empty()) {
