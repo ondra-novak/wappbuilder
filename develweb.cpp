@@ -314,7 +314,7 @@ inline void Builder::parse_lang_file(const std::string& file) {
 				std::getline(f,ln);
 				ln = trim(ln, isspace);
 				if (ln.empty() || ln[0] == '#') continue;
-				else if (checkKw("$include", ln)) parse_lang_file(rel_to_abs(dirname(file),ln));
+				else if (checkKw("!include", ln)) parse_lang_file(rel_to_abs(dirname(file),ln));
 				else {
 					auto p = ln.find('=');
 					std::string key = ln.substr(0,p);
@@ -490,19 +490,92 @@ int main(int argc, char **argv) {
 		}
 
 		if (infile.empty()) {
-				std::cerr << "Usage: " << std::endl
+				std::cerr << "Copyright (c) 2018 Ondrej Novak <nov.ondrej@gmail.com>" << std::endl
+						<< std::endl
+						<< "Permission is hereby granted, free of charge, to any person"<< std::endl
+						<< "obtaining a copy of this software and associated documentation"<< std::endl
+						<< "files (the \"Software\"), to deal in the Software without"<< std::endl
+						<< "restriction, including without limitation the rights to use,"<< std::endl
+						<< "copy, modify, merge, publish, distribute, sublicense, and/or sell"<< std::endl
+						<< "copies of the Software, and to permit persons to whom the"<< std::endl
+						<< "Software is furnished to do so, subject to the following"<< std::endl
+						<< "conditions:"<< std::endl
+						<< std::endl
+						<< "The above copyright notice and this permission notice shall be"<< std::endl
+						<< "included in all copies or substantial portions of the Software."<< std::endl
+						<< std::endl
+						<< "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,"<< std::endl
+						<< "EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES"<< std::endl
+						<< "OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND"<< std::endl
+						<< "NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT"<< std::endl
+						<< "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,"<< std::endl
+						<< "WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING"<< std::endl
+						<< "FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR"<< std::endl
+						<< "OTHER DEALINGS IN THE SOFTWARE."<< std::endl<< std::endl
+						<< "Usage: " << std::endl
 						<<std::endl
-						<< "\t" << argv[0] << " -" <<std::endl
+						<< argv[0] << " [-c][-x][-d <depfile>][-l <langfile>][-t <target>] <input.page>" <<std::endl
 						<<std::endl
-						<< "-i  <file>      read script from the file. If missing, stdin is read" <<std::endl
-						<< "-o  <file>      write result html to the file. If missing, stdout is written unless -n is specified" <<std::endl
-						<< "-l  <file>      read stringtable from the file" <<std::endl
-						<< "-c  <name>      collapse styles to <name>.css and scripts to <name>.js" <<std::endl
-						<< "-d  <file>      write makefile's dependencies to the file" <<std::endl
-						<< "-t  <text>      specify dependency target, need when -o is not given" <<std::endl
-						<< "-n              do not generate output html" <<std::endl
-						<< "-D  <dir>       specify working directory" <<std::endl
-						<< std::endl;
+						<< "<input.page>    file contains commands and references to various modules (described below)"<<std::endl
+						<< "-d  <depfile>   generated dependency file (for make)" <<std::endl
+						<< "-t  <target>    target in dependency file. If not specified, it is determined from the script" <<std::endl
+						<< "-l  <langfile>  language file (described below)" <<std::endl
+						<< "-x              do not generate output. Useful with -d (-xd depfile)" <<std::endl
+						<< "-c              collapse scripts and styles into single file(s)" <<std::endl
+						<< std::endl
+						<< "Page file format" <<std::endl
+						<< std::endl
+						<< "A common text file where each command is written to a separate line." << std::endl
+						<< "Each the line can be either empty, or contain a comment starting by #," << std::endl
+						<< "or can be a directive which starts with !, or a relative path to a module." << std::endl
+						<< std::endl
+						<< "Module: One or more files where the name (without extension) is the same." << std::endl
+						<< "The extension specifies type of resource tied to the module" << std::endl
+						<< "   - <name>.html : part of HTML code" << std::endl
+						<< "   - <name>.htm : part of HTML code" << std::endl
+						<< "   - <name>.css : part of CSS code" << std::endl
+						<< "   - <name>.js : part of JS code" << std::endl
+						<< "   - <name>.hdr : part of HTML code which is put to the header section" << std::endl
+						<< "At least one file of the module must exist." << std::endl
+						<< std::endl
+						<< "Directives" <<std::endl
+						<< std::endl
+						<< "!include <file>    - include file to the script. "<< std::endl
+						<< "                       The path is relative to the current file" <<std::endl
+						<< "!html <file>       - specify output html file (override default settins)." <<std::endl
+						<< "                       The path is relative to the root script" <<std::endl
+						<< "!css <file>        - specify output css file (override default settins)." <<std::endl
+						<< "                       The path is relative to the root script" <<std::endl
+						<< "!js <file>         - specify output js file (override default settins)" <<std::endl
+						<< "                       The path is relative to the root script" <<std::endl
+						<< "!dir <file>        - change directory of root " <<std::endl
+						<< "                       The path is relative to the root script" <<std::endl
+						<< "!charset <cp>      - set charset of the output html page" <<std::endl
+						<< "!entry_point <fn>  - specify function used as entry point. " <<std::endl
+						<< "                       You need to specify complete call, including ()" <<std::endl
+						<< "                       example: '!entry_point main()'" <<std::endl
+						<< std::endl
+						<< "LangFile" <<std::endl
+						<< std::endl
+						<< "The lang file is simple key=value file, each pair is on single line."<<std::endl
+						<< "Comments are allowed if they are start with #" <<std::endl
+						<< "Only allowed directive is !include" <<std::endl
+						<< "Inside of page (or script), any double braced text '{{text}}' is used as key to" <<std::endl
+						<< "the lang file and if the key exists, its value is used instead." <<std::endl
+						<< "The *.page file is also translated before it is parsed!" <<std::endl
+						<< std::endl
+						<< "In source references" <<std::endl
+						<< std::endl
+						<< "Inside of source files, there can be reference to other source files" << std::endl
+						<< "You can put reference as comment using directive !require" << std::endl
+						<< std::endl
+						<< "to javascript: //!require <file.js>" << std::endl
+						<< "to css: /*!require <file.js>*/" << std::endl
+						<< "to html: <!--!require <file.js>-->" << std::endl
+						<< std::endl
+						<< "referenced files are also included to the project. However circular" << std::endl
+						<< "references are not allowed resulting to break the cycle once it is detected" << std::endl;
+
 
 				return 1;
 		}
