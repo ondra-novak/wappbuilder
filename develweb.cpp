@@ -490,7 +490,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (infile.empty()) {
-				std::cerr << "Copyright (c) 2018 Ondrej Novak <nov.ondrej@gmail.com>" << std::endl
+				std::cerr << "Copyright (c) 2018 Ondrej Novak" << std::endl
 						<< std::endl
 						<< "Permission is hereby granted, free of charge, to any person"<< std::endl
 						<< "obtaining a copy of this software and associated documentation"<< std::endl
