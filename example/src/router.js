@@ -100,5 +100,6 @@ var HashRouter = (function(){
 		}
 	}
 		
+	
 })();
 

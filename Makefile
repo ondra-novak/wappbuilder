@@ -4,7 +4,7 @@ OBJS =		develweb.o
 
 LIBS =
 
-TARGET =	webpacker 
+TARGET =	wappbuild 
 
 $(TARGET):	$(OBJS)
 	$(CXX) -o $(TARGET) $(OBJS) $(LIBS)

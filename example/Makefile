@@ -10,10 +10,10 @@ all : $(FILES)
 
 ifeq ($(TARGET),debug)
 %.html : %.page
-		../webpacker -i "$<" -o "$@" -d "$(@:.html=.d)" -l $(LANGFILE)
+		../wappbuild -d "$(@:.html=.d)" -l $(LANGFILE)  "$<"   
 else
 %.html : %.page
-		../webpacker -i "$<" -o "$@" -d "$(@:.html=.d)" -l $(LANGFILE) -c "$(@:.html=)"
+		../wappbuild -d "$(@:.html=.d)" -l $(LANGFILE) -c  "$<"
 %.css : %.html
 	
 %.js : %.html

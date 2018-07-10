@@ -1,12 +1,14 @@
+//!require required1.js
+
 
 var App = function(){
 	
 	"use strict"
 
-	window.onload=function() {
+	function start() {
 		console.log("Application started...!");
 		if (!HashRouter.init()) {
-			App.mainPage();
+			this.mainPage();
 		}
 	};
 
@@ -16,7 +18,8 @@ var App = function(){
 	
 	
 	return {
-		"mainPage":mainPage
+		"mainPage":mainPage,
+		"start":start
 	};
 	
 	
