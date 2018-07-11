@@ -1,28 +1,42 @@
 
-TARGET=debug
+# use 'make TARGET=release all' to build release version
+
+TARGET:=debug
 FILES:=example.html
-LANGFILE:=en.lang 
+LANG:=en
 
--include $(FILES:.html=.d)
-
-
-all : $(FILES)
 
 ifeq ($(TARGET),debug)
-%.html : %.page
-		../wappbuild -d "$(@:.html=.d)" -l $(LANGFILE)  "$<"   
+OUTPUTS=$(addprefix debug/,$(FILES))
 else
-%.html : %.page
-		../wappbuild -d "$(@:.html=.d)" -l $(LANGFILE) -c  "$<"
-%.css : %.html
-	
-%.js : %.html
+OUTPUTS=$(addprefix $(LANG)/,$(FILES))
+endif
+
+
+-include $(OUTPUTS:.html=.d)
+
+all : $(OUTPUTS)
+
+debug:
+	@echo "Use 'make TARGET=release all' to build release version"
+	@mkdir debug
+
+$(LANG):
+	@mkdir $(LANG)
+
+
+ifeq ($(TARGET),debug)
+debug/%.html : %.page | debug
+		../wappbuild -pd "$(@:.html=.d)" -l $(LANG) -D debug "$<"   
+else
+$(LANG)/%.html : %.page | $(LANG)
+		../wappbuild -pd "$(@:.html=.d)" -l $(LANG).lang -c -D $(LANG)  "$<"
 
 endif		
 
 clean:
-	rm -f $(FILES)
-	rm -f $(FILES:.html=.css)
-	rm -f $(FILES:.html=.js)
-	rm -f $(FILES:.html=.d)
+	rm -f $(OUTPUTS)
+	rm -f $(OUTPUTS:.html=.css)
+	rm -f $(OUTPUTS:.html=.js)
+	rm -f $(OUTPUTS:.html=.d)
 	

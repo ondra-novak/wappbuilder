@@ -42,9 +42,10 @@ public:
 	void parse_page_file(const std::string &name);
 	void build_output();
 	void collapse_externals();
-	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed);
+	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed, bool phony);
 	void parse_lang_file(const std::string &langfile);
 	void walk_includes(std::vector<std::string> &container, const std::string &fname);
+	void set_root_dir(const std::string &root_dir);
 
 
 
@@ -58,6 +59,7 @@ protected:
 	std::string root_dir;
 	std::string charset;
 	std::string entry_point;
+	std::string prefix;
 
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
 	void includeFile(std::ostream &out, const std::string &fname);
@@ -90,9 +92,15 @@ std::string dirname(const std::string &name) {
 	if (pos == name.npos) return std::string();
 	else return name.substr(0,pos+1);
 }
+std::string pardirname(const std::string &name) {
+	if (name.empty()) return name;
+	if (name[name.length()-1] == '/') return pardirname(name.substr(0,name.length()-1));
+	return dirname(name);
+}
+
 std::string strip_dir(const std::string &name) {
 	auto pos = name.rfind(path_separator);
-	if (pos == name.npos) return std::string();
+	if (pos == name.npos) return name;
 	else return name.substr(pos+1);
 }
 std::string strip_ext(const std::string &name) {
@@ -114,8 +122,13 @@ std::string rel_to_abs(const std::string &dir, const std::string relpath) {
 std::string abs_to_rel(const std::string &dir, const std::string abs_path) {
 	if (abs_path.empty()) return dir;
 	if (abs_path[0] == path_separator) return abs_path;
-	if (abs_path.substr(0,dir.length()) == dir) return abs_path.substr(dir.length());
-	else return std::string(&path_separator,1)+abs_path;
+	if (dir.empty() || abs_path.substr(0,dir.length()) == dir) return abs_path.substr(dir.length());
+	else {
+		std::string up = "..";
+		up.push_back(path_separator);
+		up.append(abs_path);
+		return abs_to_rel(pardirname(dir),up);
+	}
 }
 
 void changeDir(const std::string &dir) {
@@ -254,9 +267,9 @@ void Builder::collapse_externals() {
 }
 
 
-void Builder::create_dep_file(const std::string& depfile, const std::string& target, bool collapsed) {
+void Builder::create_dep_file(const std::string& depfile, const std::string& target, bool collapsed, bool phony) {
 
-	if (target.empty()) return create_dep_file(depfile, rel_to_abs(root_dir, html_name), collapsed);
+	if (target.empty()) return create_dep_file(depfile, rel_to_abs(root_dir, html_name), collapsed, phony);
 
 	std::ofstream f(depfile, std::ios::trunc|std::ios::out);
 	if (!f) {
@@ -274,6 +287,13 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 			for (auto &&x : *y) f << "\\" << std::endl  << x;
 		}
 		f << std::endl;
+		if (phony) {
+			for (auto &&y: list ) {
+				for (auto &&x : *y) {
+					f << std::endl << x << ":" << std::endl;
+				}
+			}
+		}
 	}
 
 }
@@ -286,6 +306,13 @@ inline void Builder::parse_page_file(const std::string& name) {
 	css_name = basename+".css";
 	js_name = basename+".js";
 	parse_file(name);
+/*	std::cout << root_dir << std::endl
+			<< html_name << std::endl
+			<< css_name << std::endl
+			<< js_name << std::endl
+			<< fname << std::endl
+			<< basename << std::endl
+			<< name << std::endl;*/
 }
 
 inline void Builder::build_output() {
@@ -295,6 +322,11 @@ inline void Builder::build_output() {
 	build(outf);
 	if (!outf) error_writing(outname);
 }
+
+inline void Builder::set_root_dir(const std::string& root_dir) {
+	this->root_dir = root_dir;
+}
+
 void Builder::error_writing(const std::string& file) {
 	throw std::runtime_error("Error opening (writing) the file: " + file);
 }
@@ -458,10 +490,12 @@ int main(int argc, char **argv) {
 		std::string dep_target;
 		std::string lang_file;
 		std::string infile;
+		std::string root_dir;
 		const char *sw_end="e";
 
 		bool collapse = false;
 		bool nooutput = false;
+		bool phony = false;
 
 		const char *x = nextParam(false);
 		while (x) {
@@ -471,6 +505,8 @@ int main(int argc, char **argv) {
 					switch(*x) {
 					case 'c': collapse = true;break;
 					case 'x': nooutput = true;break;
+					case 'p': phony = true;break;
+					case 'D': root_dir = nextParam(true);x = sw_end; break;
 					case 'd': dep_file = nextParam(true);x = sw_end; break;
 					case 't': dep_target = nextParam(true);x = sw_end; break;
 					case 'l': lang_file = nextParam(true);x = sw_end ;break;
@@ -514,11 +550,12 @@ int main(int argc, char **argv) {
 						<< "OTHER DEALINGS IN THE SOFTWARE."<< std::endl<< std::endl
 						<< "Usage: " << std::endl
 						<<std::endl
-						<< argv[0] << " [-c][-x][-d <depfile>][-l <langfile>][-t <target>] <input.page>" <<std::endl
+						<< argv[0] << " [-c][-x][-p][-d <depfile>][-l <langfile>][-t <target>] <input.page>" <<std::endl
 						<<std::endl
 						<< "<input.page>    file contains commands and references to various modules (described below)"<<std::endl
 						<< "-d  <depfile>   generated dependency file (for make)" <<std::endl
 						<< "-t  <target>    target in dependency file. If not specified, it is determined from the script" <<std::endl
+						<< "-p              add phony targets to dep file" << std::endl
 						<< "-l  <langfile>  language file (described below)" <<std::endl
 						<< "-x              do not generate output. Useful with -d (-xd depfile)" <<std::endl
 						<< "-c              collapse scripts and styles into single file(s)" <<std::endl
@@ -588,8 +625,12 @@ int main(int argc, char **argv) {
 
 		builder.parse_page_file(infile);
 
+		if (!root_dir.empty()) {
+			builder.set_root_dir(root_dir);
+		}
+
 		if (!dep_file.empty()) {
-			builder.create_dep_file(dep_file, dep_target, collapse);
+			builder.create_dep_file(dep_file, dep_target, collapse, phony);
 		}
 
 
@@ -599,7 +640,7 @@ int main(int argc, char **argv) {
 		}
 
 	} catch (std::exception &e) {
-		std::cerr << "ERROR: " << e.what();
+		std::cerr << "ERROR: " << e.what() << std::endl;
 		return 5;
 	}
 

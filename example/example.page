@@ -1,7 +1,4 @@
 # comment
-!html index.html
-!css styles.css
-!js code.js
 !charset utf-8
 !entry_point App.start()
 
