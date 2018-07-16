@@ -122,7 +122,9 @@ std::string rel_to_abs(const std::string &dir, const std::string relpath) {
 std::string abs_to_rel(const std::string &dir, const std::string abs_path) {
 	if (abs_path.empty()) return dir;
 	if (abs_path[0] == path_separator) return abs_path;
-	if (dir.empty() || abs_path.substr(0,dir.length()) == dir) return abs_path.substr(dir.length());
+	if (dir.empty()) return abs_path;
+	if (dir[dir.length()-1] != '/') return abs_to_rel(dir+"/", abs_path);
+	if (abs_path.substr(0,dir.length()) == dir) return abs_path.substr(dir.length());
 	else {
 		std::string up = "..";
 		up.push_back(path_separator);
