@@ -10,6 +10,9 @@ var App = function(){
 		if (!HashRouter.init()) {
 			this.mainPage();
 		}
+		document.addEventListener("styles_loaded",function() {
+			console.log("All defered styles has been loaded...");
+		})
 	};
 
 	function mainPage() {

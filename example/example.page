@@ -1,8 +1,10 @@
 # comment
 !charset utf-8
+!defer_css yes
+!defer_script yes	
 !entry_point App.start()
 
 src/router
-src/templates
+
 src/main
 src/test

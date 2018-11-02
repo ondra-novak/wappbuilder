@@ -27,7 +27,7 @@ $(LANG):
 
 ifeq ($(TARGET),debug)
 debug/%.html : %.page | debug
-		../wappbuild -pd "$(@:.html=.d)" -l $(LANG) -D debug "$<"   
+		../wappbuild -pd "$(@:.html=.d)" -l $(LANG).lang -D debug "$<"   
 else
 $(LANG)/%.html : %.page | $(LANG)
 		../wappbuild -pd "$(@:.html=.d)" -l $(LANG).lang -c -D $(LANG)  "$<"

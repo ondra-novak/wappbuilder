@@ -60,6 +60,8 @@ protected:
 	std::string charset;
 	std::string entry_point;
 	std::string prefix;
+	bool async_css = false;
+	bool async_script = false;
 
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
 	void includeFile(std::ostream &out, const std::string &fname);
@@ -194,6 +196,10 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			charset = line;
 		} else if (checkKw("!entry_point",line)) {
 			entry_point= line;
+		} else if (checkKw("!defer_script",line)) {
+			async_script = line == "true" || line == "yes";
+		} else if (checkKw("!defer_css",line)) {
+			async_css = line == "true" || line == "yes";
 		} else {
 			std::string fpath = rel_to_abs(dir,line);
 			bool ok = false;
@@ -226,9 +232,11 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 void Builder::build(std::ostream &output) {
 
 	output << "<!DOCTYPE html><html><head>" << std::endl;
-	for (auto &&x: styles) {
-		output << "<link href=\"" << abs_to_rel(root_dir,x) << "\" rel=\"stylesheet\" type=\"text/css\" />" << std::endl;
- 	}
+	if (!async_css) {
+		for (auto &&x: styles) {
+			output << "<link href=\"" << abs_to_rel(root_dir,x) << "\" rel=\"stylesheet\" type=\"text/css\" />" << std::endl;
+		}
+	}
 	for (auto &&x: header) {
 		includeFile(output, x);
 		output << std::endl;
@@ -238,19 +246,43 @@ void Builder::build(std::ostream &output) {
 	}
 	output << "</head>" << std::endl;
 
-	if (entry_point.empty()) {
-		output << "<body>"<< std::endl;
-	} else {
-		output << "<body onload=\"" << entry_point << "\">"<< std::endl;\
-	}
+	output << "<body>"<< std::endl;
 
 	for (auto &&x: templates) {
 		includeFile(output, x);
 		output << std::endl;
  	}
 	for (auto &&x: scripts) {
-		output << "<script src=\"" << abs_to_rel(root_dir,x) << "\" type=\"text/javascript\"/></script>" << std::endl;
+		output << "<script "<< (async_script?"defer":"") << " src=\"" << abs_to_rel(root_dir,x) << "\" type=\"text/javascript\"/></script>" << std::endl;
  	}
+	if (async_css || !entry_point.empty()) {
+		output << "<script type=\"text/javascript\">"<< std::endl;
+		output << "document.addEventListener(\"DOMContentLoaded\",function(){\"use strict\";";
+
+		if (async_css) {
+
+			output << "var counts = 0;[";
+
+
+			const char *sep = "";
+			for (auto &&x: styles) {
+				output << sep << '"' << abs_to_rel(root_dir, x) << '"';
+				sep = ",";
+			}
+			output << "].forEach(function(x,p,arr) {"
+					"var f = document.createElement( \"link\" );"
+					"f.rel = \"stylesheet\";"
+					"f.href = x;"
+					"f.addEventListener(\"load\",function(){counts++;if (counts == arr.length) document.dispatchEvent( new Event(\"styles_loaded\"));});"
+					"document.head.appendChild(f);});";
+
+		}
+		if (!entry_point.empty()) {
+			output << entry_point << ";";
+		}
+		output << "});"<<std::endl << "</script>" << std::endl;
+
+	}
 	output << "</body></html>";
 	output << std::endl;
 
