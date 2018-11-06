@@ -53,6 +53,7 @@ protected:
 	std::vector<std::string> scripts, styles, templates, header;
 	std::set<std::string> includes;
 	std::map<std::string, std::string> langfile;
+	std::set<std::string> missing_lang;
 	std::string html_name;
 	std::string css_name;
 	std::string js_name;
@@ -369,28 +370,84 @@ void Builder::error_reading(const std::string& file) {
 	throw std::runtime_error("Error opening (reading) the file: " + file);
 }
 
-inline void Builder::parse_lang_file(const std::string& file) {
-	if (includes.insert(file).second) {
-		std::fstream f(file);
-		if (!f) {
-			error_reading(file);
-		} else {
-			std::string ln;
-			while (!!f) {
-				std::getline(f,ln);
-				ln = trim(ln, isspace);
-				if (ln.empty() || ln[0] == '#') continue;
-				else if (checkKw("!include", ln)) parse_lang_file(rel_to_abs(dirname(file),ln));
-				else {
-					auto p = ln.find('=');
-					std::string key = ln.substr(0,p);
-					std::string value = ln.substr(p+1);
-					langfile[key] = value;
-				}
-			}
-		}
-		includes.erase(file);
+namespace CSV {
+
+void read_except(std::istream &f , const char *seq) {
+	int c = f.get();
+	while (c != EOF && isspace(c)) {
+		c = f.get();
 	}
+	while (*seq) {
+		if (c != *seq) throw std::runtime_error("Lang file parse error ");
+		seq++;
+		c = f.get();
+	}
+	f.putback(c);
+
+}
+
+void read_string (std::istream &f, std::string &str) {
+	read_except(f, "\"");
+	str.clear();
+	int c = f.get();
+	do {
+		while (c != EOF && c != '"') {
+			str.push_back(c);
+			c = f.get();
+		}
+		if (c == '"') {
+			char d = f.get();
+			if (d != c) {
+				f.putback(d);
+				return;
+			} else {
+				str.push_back(c);
+			}
+		} else {
+			return;
+		}
+	} while (true);
+}
+
+
+}
+
+inline void Builder::parse_lang_file(const std::string& file) {
+
+	using namespace CSV;
+
+	std::ifstream f(file);
+
+	if (!f) {
+		error_reading(file);
+	}
+
+
+
+	std::string ns;
+	std::string orgtext;
+	std::string translated_text;
+	std::string key;
+	while (!!f) {
+
+		read_string(f, ns);
+		read_except(f,",");
+		read_string(f, orgtext);
+		read_except(f,",");
+		read_string(f, translated_text);
+		read_except(f,"\r\n");
+
+		key.clear();
+		if (!ns.empty()) {
+			key.append(ns);
+			key.append("::");
+		}
+		key.append(orgtext);
+		langfile[key] = translated_text;
+	}
+
+
+
 }
 
 void Builder::collapse(std::vector<std::string>& block, const std::string& outfile) {
@@ -434,6 +491,7 @@ void Builder::scan_variable(std::istream& in, Out && out) {
 						writeout = &iter->second;
 					} else {
 						writeout = &name;
+						missing_lang.insert(name);
 					}
 					for (auto && c: *writeout) out(c);
 					return;
@@ -523,6 +581,7 @@ int main(int argc, char **argv) {
 		std::string dep_file;
 		std::string dep_target;
 		std::string lang_file;
+		std::string gen_lang_file;
 		std::string infile;
 		std::string root_dir;
 		const char *sw_end="e";
@@ -543,7 +602,11 @@ int main(int argc, char **argv) {
 					case 'D': root_dir = nextParam(true);x = sw_end; break;
 					case 'd': dep_file = nextParam(true);x = sw_end; break;
 					case 't': dep_target = nextParam(true);x = sw_end; break;
-					case 'l': lang_file = nextParam(true);x = sw_end ;break;
+					case 'L': lang_file = nextParam(true);x = sw_end; break;
+					case 'G': gen_lang_file = nextParam(true);x = sw_end; break;
+					case 'l':
+						std::cerr << "Switch -l is no longer supported " << x << std::endl;
+						return 1;
 					default:
 						std::cerr << "Unknown switch " << x << std::endl;
 						return 1;
@@ -590,7 +653,8 @@ int main(int argc, char **argv) {
 						<< "-d  <depfile>   generated dependency file (for make)" <<std::endl
 						<< "-t  <target>    target in dependency file. If not specified, it is determined from the script" <<std::endl
 						<< "-p              add phony targets to dep file" << std::endl
-						<< "-l  <langfile>  language file (described below)" <<std::endl
+						<< "-L  <langfile>  language file (csv)" <<std::endl
+						<< "-G  <langfile>  output generated lang file (csv)" <<std::endl
 						<< "-x              do not generate output. Useful with -d (-xd depfile)" <<std::endl
 						<< "-c              collapse scripts and styles into single file(s)" <<std::endl
 						<< std::endl
@@ -625,15 +689,8 @@ int main(int argc, char **argv) {
 						<< "!entry_point <fn>  - specify function used as entry point. " <<std::endl
 						<< "                       You need to specify complete call, including ()" <<std::endl
 						<< "                       example: '!entry_point main()'" <<std::endl
-						<< std::endl
-						<< "LangFile" <<std::endl
-						<< std::endl
-						<< "The lang file is simple key=value file, each pair is on single line."<<std::endl
-						<< "Comments are allowed if they are start with #" <<std::endl
-						<< "Only allowed directive is !include" <<std::endl
-						<< "Inside of page (or script), any double braced text '{{text}}' is used as key to" <<std::endl
-						<< "the lang file and if the key exists, its value is used instead." <<std::endl
-						<< "The *.page file is also translated before it is parsed!" <<std::endl
+						<< "!defer_script yes  - script is loaded with defer flag. " <<std::endl
+						<< "!defer_css yes     - styles are loaded after scripts. " <<std::endl
 						<< std::endl
 						<< "In source references" <<std::endl
 						<< std::endl
@@ -645,7 +702,17 @@ int main(int argc, char **argv) {
 						<< "to html: <!--!require <file.js>-->" << std::endl
 						<< std::endl
 						<< "referenced files are also included to the project. However circular" << std::endl
-						<< "references are not allowed resulting to break the cycle once it is detected" << std::endl;
+						<< "references are not allowed resulting to break the cycle once it is detected" << std::endl
+						<< std::endl
+						<< "Language" <<std::endl
+						<< std::endl
+						<< "You can use placeholder " << std::endl
+						<< "   {{text}} " << std::endl
+						<< "   {{namespace::text}} " << std::endl
+						<< "   {{ns1::ns2::...::text}} "<< std::endl
+						<< "instead of text to refer text in the language file " <<std::endl
+						<< std::endl
+						<< "Use -G to generate the language file" <<std::endl;
 
 
 				return 1;
