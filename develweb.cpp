@@ -44,8 +44,10 @@ public:
 	void collapse_externals();
 	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed, bool phony);
 	void parse_lang_file(const std::string &langfile);
+	void gen_lang_file(const std::string &langfile);
 	void walk_includes(std::vector<std::string> &container, const std::string &fname);
 	void set_root_dir(const std::string &root_dir);
+	void set_base_name(const std::string &out_file);
 
 
 
@@ -61,6 +63,8 @@ protected:
 	std::string charset;
 	std::string entry_point;
 	std::string prefix;
+	std::string lang_file_name
+	;
 	bool async_css = false;
 	bool async_script = false;
 
@@ -321,6 +325,8 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 		for (auto &&y: list ) {
 			for (auto &&x : *y) f << "\\" << std::endl  << x;
 		}
+		if (!lang_file_name.empty())
+				f << "\\" << std::endl  << lang_file_name;
 		f << std::endl;
 		if (phony) {
 			for (auto &&y: list ) {
@@ -328,18 +334,24 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 					f << std::endl << x << ":" << std::endl;
 				}
 			}
+			if (!lang_file_name.empty())
+				f << std::endl << lang_file_name << ":" << std::endl;
 		}
 	}
 
+}
+
+void Builder::set_base_name(const std::string &basename) {
+	html_name = basename+".html";
+	css_name = basename+".css";
+	js_name = basename+".js";
 }
 
 inline void Builder::parse_page_file(const std::string& name) {
 	root_dir = dirname(name);
 	std::string fname = strip_dir(name);
 	std::string basename = strip_ext(fname);
-	html_name = basename+".html";
-	css_name = basename+".css";
-	js_name = basename+".js";
+	set_base_name(basename);
 	parse_file(name);
 /*	std::cout << root_dir << std::endl
 			<< html_name << std::endl
@@ -374,7 +386,7 @@ namespace CSV {
 
 void read_except(std::istream &f , const char *seq) {
 	int c = f.get();
-	while (c != EOF && isspace(c)) {
+	while (c != EOF && isspace(c) && c != *seq) {
 		c = f.get();
 	}
 	while (*seq) {
@@ -384,6 +396,15 @@ void read_except(std::istream &f , const char *seq) {
 	}
 	f.putback(c);
 
+}
+
+void write_string(std::ostream &f, const std::string &s) {
+	f.put('"');
+	for (auto &&x: s) {
+		if (x == '"') f << "\"\"";
+		else f.put(x);
+	}
+	f.put('"');
 }
 
 void read_string (std::istream &f, std::string &str) {
@@ -422,6 +443,8 @@ inline void Builder::parse_lang_file(const std::string& file) {
 		error_reading(file);
 	}
 
+	this->lang_file_name = file;
+
 
 
 	std::string ns;
@@ -444,8 +467,11 @@ inline void Builder::parse_lang_file(const std::string& file) {
 		}
 		key.append(orgtext);
 		langfile[key] = translated_text;
-	}
 
+		int c = f.get();
+		while (c != EOF && isspace(c)) c = f.get();;
+		if (c != EOF) f.putback(c);
+	}
 
 
 }
@@ -490,8 +516,11 @@ void Builder::scan_variable(std::istream& in, Out && out) {
 					if (iter != langfile.end()) {
 						writeout = &iter->second;
 					} else {
-						writeout = &name;
 						missing_lang.insert(name);
+						auto pos = name.rfind("::");
+						if (pos != name.npos)
+							name = name.substr(pos+2);
+						writeout = &name;
 					}
 					for (auto && c: *writeout) out(c);
 					return;
@@ -560,6 +589,25 @@ void Builder::walk_includes(std::vector<std::string> &container, const std::stri
 
 }
 
+void Builder::gen_lang_file(const std::string &langfile) {
+	using namespace CSV;
+	std::ofstream out(langfile, std::ios::out| std:: ios::trunc);
+	if (!out) error_writing(langfile);
+	for (auto &&x: missing_lang) {
+		auto pos = x.rfind("::");
+		if (pos == x.npos) {
+			out << "\"\",";
+			write_string(out, x);
+		} else {
+			write_string(out, x.substr(0,pos));
+			out.put(',');
+			write_string(out, x.substr(pos+2));
+		}
+		out << ",\"\"\r\n";
+	}
+}
+
+
 
 int main(int argc, char **argv) {
 
@@ -584,6 +632,7 @@ int main(int argc, char **argv) {
 		std::string gen_lang_file;
 		std::string infile;
 		std::string root_dir;
+		std::string base_name;
 		const char *sw_end="e";
 
 		bool collapse = false;
@@ -604,6 +653,7 @@ int main(int argc, char **argv) {
 					case 't': dep_target = nextParam(true);x = sw_end; break;
 					case 'L': lang_file = nextParam(true);x = sw_end; break;
 					case 'G': gen_lang_file = nextParam(true);x = sw_end; break;
+					case 'B': base_name = nextParam(true);x = sw_end; break;
 					case 'l':
 						std::cerr << "Switch -l is no longer supported " << x << std::endl;
 						return 1;
@@ -655,6 +705,7 @@ int main(int argc, char **argv) {
 						<< "-p              add phony targets to dep file" << std::endl
 						<< "-L  <langfile>  language file (csv)" <<std::endl
 						<< "-G  <langfile>  output generated lang file (csv)" <<std::endl
+						<< "-B  <name>      override basename"<<std::endl
 						<< "-x              do not generate output. Useful with -d (-xd depfile)" <<std::endl
 						<< "-c              collapse scripts and styles into single file(s)" <<std::endl
 						<< std::endl
@@ -685,7 +736,7 @@ int main(int argc, char **argv) {
 						<< "                       The path is relative to the root script" <<std::endl
 						<< "!dir <file>        - change directory of root " <<std::endl
 						<< "                       The path is relative to the root script" <<std::endl
-						<< "!charset <cp>      - set charset of the output html page" <<std::endl
+						<< "!charset <cp>    of )  - set charset of the output html page" <<std::endl
 						<< "!entry_point <fn>  - specify function used as entry point. " <<std::endl
 						<< "                       You need to specify complete call, including ()" <<std::endl
 						<< "                       example: '!entry_point main()'" <<std::endl
@@ -721,10 +772,18 @@ int main(int argc, char **argv) {
 		Builder builder;
 
 		if (!lang_file.empty()) {
-			builder.parse_lang_file(lang_file);
+			try {
+				builder.parse_lang_file(lang_file);
+			} catch (std::exception &e) {
+				std::cerr << "Warning: " << e.what() << std::endl;
+			}
 		}
 
 		builder.parse_page_file(infile);
+
+		if (!base_name.empty()) {
+			builder.set_base_name(base_name);
+		}
 
 		if (!root_dir.empty()) {
 			builder.set_root_dir(root_dir);
@@ -734,10 +793,13 @@ int main(int argc, char **argv) {
 			builder.create_dep_file(dep_file, dep_target, collapse, phony);
 		}
 
-
 		if (!nooutput) {
 			if (collapse) builder.collapse_externals();
 			builder.build_output();
+		}
+
+		if (!gen_lang_file.empty()) {
+			builder.gen_lang_file(gen_lang_file);
 		}
 
 	} catch (std::exception &e) {
