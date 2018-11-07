@@ -68,6 +68,9 @@ protected:
 	bool async_css = false;
 	bool async_script = false;
 	bool hasLang = false;
+	bool override_html_name = false;
+	bool override_css_name = false;
+	bool override_js_name = false;
 
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
 	void includeFile(std::ostream &out, const std::string &fname);
@@ -192,10 +195,13 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			parse_file(fname);
 		} else if (checkKw("!html",line)) {
 			html_name = line;
+			override_html_name = true;
 		} else if (checkKw("!css",line)) {
 			css_name = line;
+			override_css_name = true;
 		} else if (checkKw("!js",line)) {
 			js_name = line;
+			override_js_name = true;
 		} else if (checkKw("!dir",line)) {
 			root_dir = line;
 		} else if (checkKw("!charset",line)) {
@@ -343,9 +349,9 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 }
 
 void Builder::set_base_name(const std::string &basename) {
-	html_name = basename+".html";
-	css_name = basename+".css";
-	js_name = basename+".js";
+	if (!override_html_name) html_name = basename+".html";
+	if (!override_css_name) css_name = basename+".css";
+	if (!override_js_name) js_name = basename+".js";
 }
 
 inline void Builder::parse_page_file(const std::string& name) {
@@ -436,6 +442,8 @@ void read_string (std::istream &f, std::string &str) {
 
 inline void Builder::parse_lang_file(const std::string& file) {
 
+	hasLang = true;
+
 	using namespace CSV;
 
 	std::ifstream f(file);
@@ -473,7 +481,6 @@ inline void Builder::parse_lang_file(const std::string& file) {
 		while (c != EOF && isspace(c)) c = f.get();;
 		if (c != EOF) f.putback(c);
 	}
-	hasLang = true;
 }
 
 void Builder::collapse(std::vector<std::string>& block, const std::string& outfile) {

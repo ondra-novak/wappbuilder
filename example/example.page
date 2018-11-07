@@ -3,8 +3,10 @@
 !defer_css yes
 !defer_script yes	
 !entry_point App.start()
+!css style.css
 
 src/router
+src/lang_{{Langscript::en}}
 
 src/main
 src/test
