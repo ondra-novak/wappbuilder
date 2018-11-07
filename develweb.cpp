@@ -62,6 +62,7 @@ protected:
 	std::string prefix;
 	bool async_css = false;
 	bool async_script = false;
+	bool hasLang = false;
 
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
 	void includeFile(std::ostream &out, const std::string &fname);
@@ -161,7 +162,7 @@ void Builder::parse_file(const std::string &fname) {
 	if (!f) {
 		error_reading(fname);
 	}
-	if (langfile.empty()) {
+	if (!hasLang) {
 		parse(dirname(fname),f);
 	} else {
 		std::ostringstream tmpfile;
@@ -224,7 +225,7 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 				walk_includes(header, name);
 			}
 			if (!ok)
-				throw std::runtime_error("Cannot find module: "+ name);
+				throw std::runtime_error("Cannot find module: "+ line + ".*");
 		}
 	}
 
@@ -391,6 +392,7 @@ inline void Builder::parse_lang_file(const std::string& file) {
 		}
 		includes.erase(file);
 	}
+	hasLang = true;
 }
 
 void Builder::collapse(std::vector<std::string>& block, const std::string& outfile) {
@@ -433,6 +435,8 @@ void Builder::scan_variable(std::istream& in, Out && out) {
 					if (iter != langfile.end()) {
 						writeout = &iter->second;
 					} else {
+						auto p = name.rfind("::"); //namespace in lang file
+						if (p != name.npos) name = name.substr(p+2);
 						writeout = &name;
 					}
 					for (auto && c: *writeout) out(c);
@@ -659,12 +663,13 @@ int main(int argc, char **argv) {
 
 		builder.parse_page_file(infile);
 
+
 		if (!root_dir.empty()) {
 			builder.set_root_dir(root_dir);
 		}
 
 		if (!dep_file.empty()) {
-			builder.create_dep_file(dep_file, dep_target, collapse, phony);
+			builder.create_dep_file(dep_file, dep_target, true, phony);
 		}
 
 
