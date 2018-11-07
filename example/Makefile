@@ -1,5 +1,48 @@
+PAGES:=example 
+TARGETS:=en cz
+
+ALL_BUILDS:=$(foreach n,$(TARGETS),$(addsuffix _$(n).html,$(PAGES)))
+DEBUG_BUILDS:=$(ALL_BUILDS:.html=_debug.html)
+
+all: $(ALL_BUILDS) $(DEBUG_BUILDS)
+
+clean: 
+	rm -rf $(ALL_BUILDS) $(DEBUG_BUILDS)
+	rm -rf $(ALL_BUILDS:.html=.css)
+	rm -rf $(ALL_BUILDS:.html=.js) 
+	rm -rf $(ALL_BUILDS:.html=.d)
+	rm -rf $(DEBUG_BUILDS:.html=.d)
+
+define RELEASE_template =
+%_$(1).html: %.page;	../wappbuild -pd "$$(@:.html=.d)" -L $(1)_lang.csv -G $(1)_genlang.csv -c -B $$*_$(1) "$$<" 
+endef
+
+define DEBUG_template =
+%_$(1)_debug.html: %.page;	../wappbuild -pd "$$(@:.html=.d)" -L $(1)_lang.csv -B $$*_$(1)_debug "$$<" 
+endef
+
+$(foreach n,$(TARGETS),$(eval $(call RELEASE_template,$(n))))
+$(foreach n,$(TARGETS),$(eval $(call DEBUG_template,$(n))))
+
+
+-include $(ALL_BUILDS:.html=.d)
+-include $(DEBUG_BUILDS:.html=.d)
+
+
+
+
+
+
+
+ifeq (a,b)
+
+
 
 # use 'make TARGET=release all' to build release version
+
+
+
+
 
 TARGET:=debug
 FILES:=example.html
@@ -40,3 +83,4 @@ clean:
 	rm -f $(OUTPUTS:.html=.js)
 	rm -f $(OUTPUTS:.html=.d)
 	
+endif
