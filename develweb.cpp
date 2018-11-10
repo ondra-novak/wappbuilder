@@ -50,6 +50,19 @@ public:
 	bool exists(const std::string &item) {
 		return container.find(item) != container.end();
 	}
+	bool commit(const std::string &item) {
+		auto x = container.find(item);
+		if (x != container.end()) {
+			x->second = counter++;
+			return true;
+		} else {
+			return false;
+		}
+	}
+	bool lock(const std::string &item) {
+		return container.insert(std::pair<std::string, int>(item,0)).second;
+	}
+
 	iterator begin() {return container.begin();}
 	const_iterator begin() const {return container.begin();}
 	iterator end() {return container.end();}
@@ -778,7 +791,7 @@ bool SourceContainer::detect_require(const std::string &line, std::string &rest)
 void Builder::walk_includes(SourceContainer &curContainer, std::string fname, bool force_container) {
 	SourceContainer  &container = force_container?curContainer:chooseContainer(curContainer, fname);
 
-	if (container.push_back(fname)) {
+	if (container.lock(fname)) {
 		std::ifstream f(fname);
 		if (!f)  {
 			error_reading(fname);
@@ -808,6 +821,7 @@ void Builder::walk_includes(SourceContainer &curContainer, std::string fname, bo
 				}
 			}
 		}
+		container.commit(fname);
 	}
 
 }
