@@ -12,7 +12,9 @@
 #include <set>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
+#include <chrono>
 
 #ifdef _WIN32
 	static char path_separator='\\';
@@ -81,6 +83,21 @@ struct PrefixSuffix {
 	std::string suffix;
 };
 
+class SourceContainer : public OrderedSet {
+public:
+
+	SourceContainer(std::string extension, const PrefixSuffix &comment_ps)
+		:extension(extension)
+		,comment_ps(comment_ps) {}
+
+	const std::string extension;
+	const PrefixSuffix comment_ps;
+	std::string outfile;
+
+	bool detect_require(const std::string &line, std::string &rest) const;
+
+};
+
 static PrefixSuffix html={"<!--","-->"};
 static PrefixSuffix css={"/*","*/"};
 static PrefixSuffix js={"//",""};
@@ -90,25 +107,33 @@ class Builder {
 public:
 
 
+	Builder()
+		:scripts(".js",{"//",""})
+		,styles(".css",{"/*","*/"})
+		,templates(".html",{"<!--","-->"})
+		,header(".hdr",{"<!--","-->"}) {}
+
 	void parse_page_file(const std::string &name);
 	void build_output();
 	void collapse_externals();
+	void collapse_customs();
 	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed, bool phony);
 	void parse_lang_file(const std::string &langfile);
 	void gen_lang_file(const std::string &langfile);
-	void walk_includes(OrderedSet &container, const std::string &fname, const PrefixSuffix &ps);
+	void walk_includes(SourceContainer &container, std::string fname, bool force_container);
 	void set_root_dir(const std::string &root_dir);
 	void set_base_name(const std::string &out_file);
-	OrderedSet &chooseContainer(OrderedSet & current, const std::string &fname);
+	SourceContainer  &chooseContainer(SourceContainer & current, std::string &fname);
 
 
 protected:
-	OrderedSet scripts, styles, templates, header;
+	SourceContainer scripts, styles, templates, header;
+	std::map<std::string, SourceContainer> customContainers;
 	std::map<std::string, std::string> langfile;
 	std::set<std::string> missing_lang;
-	std::string html_name;
+/*	std::string html_name;
 	std::string css_name;
-	std::string js_name;
+	std::string js_name;*/
 	std::string root_dir;
 	std::string charset;
 	std::string entry_point;
@@ -123,9 +148,9 @@ protected:
 	bool override_js_name = false;
 
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
-	void includeFile(std::ostream &out, const std::string &fname);
+	void includeFile(const SourceContainer *cont, std::ostream &out, const std::string &fname);
 
-	void collapse(OrderedSet &block, const std::string &outfile);
+	void collapse(SourceContainer &block, const std::string &outfile);
 	void parse(const std::string &dir, std::istream &input);
 	void build(std::ostream &output);
 	void parse_file(const std::string &fname);
@@ -134,16 +159,17 @@ private:
 	static void error_reading(const std::string& file);
 	static void error_writing(const std::string& file);
 	template<typename Out>
-	void translate_file(std::ifstream &in, Out &&out);
+	void translate_file(const SourceContainer *cont, std::ifstream &in, Out &&out);
 	template<typename Out>
 	void scan_variable(std::istream& in, Out &&out);
+	void parseOutputLine(const std::string &line);
 };
 
 class OStreamOut {
 public:
 
 	OStreamOut(std::ostream &out):out(out) {}
-	void operator()(char c) const {out.put(c);}
+	void operator()(const std::string &s) const {out << s << std::endl;}
 protected:
 	std::ostream &out;
 };
@@ -224,12 +250,50 @@ void Builder::parse_file(const std::string &fname) {
 		parse(dirname(fname),f);
 	} else {
 		std::ostringstream tmpfile;
-		translate_file(f,OStreamOut(tmpfile));
+		translate_file(nullptr, f,OStreamOut(tmpfile));
 		std::istringstream rdtmpfile(tmpfile.str());
 		parse(dirname(fname), rdtmpfile);
 	}
 }
 
+
+void Builder::parseOutputLine(const std::string &line) {
+	  std::istringstream f(line);
+	  std::string name, fname;
+	  getline(f, name, ',');
+	  getline(f, fname, ',');
+
+	  name = trim(name,isspace);
+	  fname = trim(fname,isspace);
+
+
+	  if (fname.empty()) throw std::runtime_error("Syntax error: !output "+line);
+
+	  std::string extension;
+
+	  {
+		  auto p = fname.rfind('.');
+		  if (p != fname.npos) extension = fname.substr(p);
+	  }
+
+	  PrefixSuffix ps;
+	  if (extension == ".js") {
+		  ps = scripts.comment_ps;
+	  } else if (extension == ".css") {
+		  ps = styles.comment_ps;
+	  } else if (extension == ".html" || extension == ".xml") {
+		  ps = templates.comment_ps;
+	  } else {
+		  ps = {"#",""};
+	  }
+
+	  SourceContainer cnt(extension, ps);
+	  cnt.outfile  = fname;
+	  if (!customContainers.insert(std::make_pair(name, cnt)).second) {
+		  throw std::runtime_error("Duplicate: !output " + line);
+	  }
+
+}
 
 void Builder::parse(const std::string &dir, std::istream &input) {
 
@@ -244,13 +308,13 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			std::string fname = dir+line.substr(9);
 			parse_file(fname);
 		} else if (checkKw("!html",line)) {
-			html_name = line;
+			templates.outfile = line;
 			override_html_name = true;
 		} else if (checkKw("!css",line)) {
-			css_name = line;
+			styles.outfile = line;
 			override_css_name = true;
 		} else if (checkKw("!js",line)) {
-			js_name = line;
+			scripts.outfile = line;
 			override_js_name = true;
 		} else if (checkKw("!dir",line)) {
 			root_dir = line;
@@ -262,28 +326,26 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			async_script = line == "true" || line == "yes";
 		} else if (checkKw("!defer_css",line)) {
 			async_css = line == "true" || line == "yes";
+		} else if (checkKw("!output",line)) {
+			parseOutputLine(line);
 		} else {
 			std::string fpath = rel_to_abs(dir,line);
 			bool ok = false;
 			if (try_ext(fpath, ".html", name)) {
-				walk_includes(templates,name, html);
-				ok = true;
-			}
-			if (try_ext(fpath, ".htm", name)) {
-				walk_includes(templates,name, html);
+				walk_includes(templates,name,true);
 				ok = true;
 			}
 			if (try_ext(fpath, ".css", name)) {
 				ok = true;
-				walk_includes(styles, name, css);
+				walk_includes(styles, name,true);
 			}
 			if (try_ext(fpath, ".js", name)) {
 				ok = true;
-				walk_includes(scripts,name, js);
+				walk_includes(scripts,name,true);
 			}
 			if (try_ext(fpath, ".hdr", name)) {
 				ok = true;
-				walk_includes(header, name, html);
+				walk_includes(header, name,true);
 			}
 			if (!ok)
 				throw std::runtime_error("Cannot find module: "+ line + ".*");
@@ -300,7 +362,7 @@ void Builder::build(std::ostream &output) {
 		}
 	}
 	for (auto &&x: header.getOrdered()) {
-		includeFile(output, x);
+		includeFile(&header,output, x);
 		output << std::endl;
  	}
 	if (!charset.empty()) {
@@ -311,7 +373,7 @@ void Builder::build(std::ostream &output) {
 	output << "<body>"<< std::endl;
 
 	for (auto &&x: templates.getOrdered()) {
-		includeFile(output, x);
+		includeFile(&templates, output, x);
 		output << std::endl;
  	}
 	for (auto &&x: scripts.getOrdered()) {
@@ -358,50 +420,65 @@ bool Builder::try_ext(const std::string& line, const char* ext,	std::string& ful
 }
 
 void Builder::collapse_externals() {
-	collapse(styles, rel_to_abs(root_dir, css_name));
-	collapse(scripts, rel_to_abs(root_dir, js_name));
+	collapse(styles, rel_to_abs(root_dir, styles.outfile));
+	collapse(scripts, rel_to_abs(root_dir, scripts.outfile));
+}
+
+void Builder::collapse_customs() {
+
+	for (auto &&c: customContainers) {
+		SourceContainer &cont = c.second;
+		collapse(cont, rel_to_abs(root_dir, cont.outfile));
+	}
 }
 
 
 void Builder::create_dep_file(const std::string& depfile, const std::string& target, bool collapsed, bool phony) {
 
-	if (target.empty()) return create_dep_file(depfile, rel_to_abs(root_dir, html_name), collapsed, phony);
+	if (target.empty()) return create_dep_file(depfile, rel_to_abs(root_dir, templates.outfile), collapsed, phony);
+
+	std::unordered_set<std::string> files;
+
+	std::initializer_list<OrderedSet *> list_collapsed{
+			&templates, &styles, &scripts, &header,
+	};
+	std::initializer_list<OrderedSet *> list_debug{
+			&templates, &header,
+	};
+	auto &list=collapsed?list_collapsed:list_debug;
+	for (auto &&y: list ) {
+		for (auto &&x : *y)
+			files.insert(x.first);
+	}
+	if (!lang_file_name.empty())
+			files.insert(lang_file_name);
+	for (auto &&y: customContainers) {
+		for (auto &&x: y.second) {
+			files.insert(x.first);
+		}
+	}
 
 	std::ofstream f(depfile, std::ios::trunc|std::ios::out);
 	if (!f) {
 		std::cerr << "Error writing to file: " << depfile << std::endl;
 	} else {
 		f << target << " " <<  depfile << " :";
-		std::initializer_list<OrderedSet *> list_collapsed{
-				&templates, &styles, &scripts, &header,
-		};
-		std::initializer_list<OrderedSet *> list_debug{
-				&templates, &header,
-		};
-		auto &list=collapsed?list_collapsed:list_debug;
-		for (auto &&y: list ) {
-			for (auto &&x : *y) f << "\\" << std::endl  << x.first;
+		for (auto &&x: files) {
+			f << "\\" << std::endl  << x;
 		}
-		if (!lang_file_name.empty())
-				f << "\\" << std::endl  << lang_file_name;
-		f << std::endl;
 		if (phony) {
-			for (auto &&y: list ) {
-				for (auto &&x : *y) {
-					f << std::endl << x.first << ":" << std::endl;
-				}
+			for (auto &&x: files) {
+					f << std::endl << x << ":" << std::endl;
 			}
-			if (!lang_file_name.empty())
-				f << std::endl << lang_file_name << ":" << std::endl;
 		}
 	}
 
 }
 
 void Builder::set_base_name(const std::string &basename) {
-	if (!override_html_name) html_name = basename+".html";
-	if (!override_css_name) css_name = basename+".css";
-	if (!override_js_name) js_name = basename+".js";
+	if (!override_html_name) templates.outfile = basename+".html";
+	if (!override_css_name) styles.outfile = basename+".css";
+	if (!override_js_name) scripts.outfile = basename+".js";
 }
 
 inline void Builder::parse_page_file(const std::string& name) {
@@ -420,7 +497,7 @@ inline void Builder::parse_page_file(const std::string& name) {
 }
 
 inline void Builder::build_output() {
-	std::string outname = rel_to_abs(root_dir, html_name);
+	std::string outname = rel_to_abs(root_dir, templates.outfile);
 	std::fstream outf(outname, std::ios::out|std::ios::trunc);
 	if (!outf) error_writing(outname);
 	build(outf);
@@ -533,13 +610,13 @@ inline void Builder::parse_lang_file(const std::string& file) {
 	}
 }
 
-void Builder::collapse(OrderedSet& block, const std::string& outfile) {
+void Builder::collapse(SourceContainer& block, const std::string& outfile) {
 	std::ofstream f(outfile, std::ios::trunc|std::ios::out);
 	if (!f) {
 		std::cerr << "Error writing to file: " << outfile << std::endl;
 	} else {
 		for (auto &&x : block.getOrdered()) {
-			includeFile(f, x);
+			includeFile(&block, f, x);
 		}
 		f << std::endl;
 	}
@@ -592,25 +669,49 @@ void Builder::scan_variable(std::istream& in, Out && out) {
 }
 
 template<typename Out>
-void Builder::translate_file(std::ifstream &in, Out&& out) {
-	int i = in.get();
-	while (i != EOF) {
-		if (i == '{') {
-			in.putback(i);
-			scan_variable(in, out);
-		} else {
-			out(i);
+void Builder::translate_file(const SourceContainer *cont, std::ifstream &in, Out&& out) {
+	std::string x;
+	std::string tmp;
+	while (std::getline(in,x)) {
+		if (cont && cont->detect_require(x, tmp))
+			continue;
+		std::size_t from = 0;
+		auto p = x.find("{{", from);
+		while (p != x.npos) {
+			p += from;
+			auto q = x.find("}}",p);
+			std::string varname = x.substr(p+2,q-2-p);
+			auto l = langfile.find(varname);
+			if (l == langfile.end()) {
+				if (varname == "!timestamp") {
+					std::ostringstream buff;
+					buff << std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+					varname = buff.str();
+				} else {
+					missing_lang.insert(varname);
+					auto z = varname.rfind("::");
+					if (z != varname.npos) {
+						varname = varname.substr(z+2);
+					}
+				}
+				x = x.substr(0,p) + varname + x.substr(q+2);
+				from = p+varname.length();
+			} else {
+				x = x.substr(0,p) + l->second + x.substr(q+2);
+				from = p+l->second.length();
+			}
+			p = x.find("{{", from);
 		}
-		i = in.get();
+		out(x);
 	}
 }
 
-void Builder::includeFile(std::ostream& out, const std::string& fname) {
+void Builder::includeFile(const SourceContainer *cont, std::ostream& out, const std::string& fname) {
 	std::ifstream in(fname);
 	if (!in) {
 		error_reading(fname);
 	} else {
-		translate_file(in, OStreamOut(out));
+		translate_file(cont, in, OStreamOut(out));
 	}
 }
 
@@ -642,19 +743,40 @@ bool endsWith(const std::string& subject, const char *test) {
 	return true;
 }
 
-OrderedSet &Builder::chooseContainer(OrderedSet & current, const std::string &fname) {
+SourceContainer  &Builder::chooseContainer(SourceContainer & current, std::string &fname) {
+	if (fname.empty()) {
+		throw std::runtime_error("'require' of empty filename");
+	}
+	if (endsWith(fname, current.extension.c_str())) return current;
 	if (endsWith(fname,".js")) return scripts;
 	else if (endsWith(fname,".css")) return styles;
 	else if (endsWith(fname,".hdr")) return header;
 	else if (endsWith(fname,".html")) return templates;
 	else if (endsWith(fname,".htm")) return templates;
 	else return current;
-
 }
 
 
-void Builder::walk_includes(OrderedSet &curContainer, const std::string &fname, const PrefixSuffix &ps) {
-	OrderedSet &container = chooseContainer(curContainer, fname);
+bool SourceContainer::detect_require(const std::string &line, std::string &rest) const {
+
+	if (line.empty()) return false;
+	if (isspace(line[0])) {
+		rest = trim(line,isspace);
+		return detect_require(rest, rest);
+	}
+	if (beginsWith(line,comment_ps.prefix.c_str())
+	  && endsWith(line,comment_ps.suffix.c_str())) {
+		rest = trim(line.substr(comment_ps.prefix.length(), line.length() - comment_ps.prefix.length() - comment_ps.suffix.length()),isspace);
+		if (checkKw("!require", rest)) {
+			return true;
+		}
+	}
+	return false;
+
+}
+
+void Builder::walk_includes(SourceContainer &curContainer, std::string fname, bool force_container) {
+	SourceContainer  &container = force_container?curContainer:chooseContainer(curContainer, fname);
 
 	if (container.push_back(fname)) {
 		std::ifstream f(fname);
@@ -663,14 +785,26 @@ void Builder::walk_includes(OrderedSet &curContainer, const std::string &fname, 
 		}
 
 		std::string line;
+		std::string tline;
 
 		while (!!f) {
 			std::getline(f,line);
-			std::string tline(trim(line, isspace));
-			if (beginsWith(line,ps.prefix.c_str()) && endsWith(line, ps.suffix.c_str())) {
-				line = trim(line.substr(ps.prefix.length(), line.length() - ps.prefix.length() - ps.suffix.length()),isspace);
-				if (checkKw("!require", line)) {
-					walk_includes(container, rel_to_abs(dirname(fname), line), ps);
+			tline = trim(line, isspace);
+			if (container.detect_require(tline, line)) {
+				if (beginsWith(line,"@")) {
+					auto p = line.find(' ');
+					if (p == line.npos) {
+						throw std::runtime_error("'require' invalid format: "+fname);
+					}
+					std::string name = trim(line.substr(1,p-1),isspace);
+					auto s = customContainers.find(name);
+					if (s == customContainers.end()) {
+						throw std::runtime_error("Output file is not defined: "+fname);
+					}
+					line = trim(line.substr(p+1),isspace);
+					walk_includes(s->second, rel_to_abs(dirname(fname), line), true);
+				} else {
+					walk_includes(container, rel_to_abs(dirname(fname), line), false);
 				}
 			}
 		}
@@ -786,7 +920,7 @@ int main(int argc, char **argv) {
 						<< "OTHER DEALINGS IN THE SOFTWARE."<< std::endl<< std::endl
 						<< "Usage: " << std::endl
 						<<std::endl
-						<< argv[0] << " [-c][-x][-p][-d <depfile>][-l <langfile>][-t <target>] <input.page>" <<std::endl
+						<< argv[0] << " [-c][-x][-p][-d <depfile>][-t <target>][-L <langfile>][-G <langfile>][-B basename] <input.page>" <<std::endl
 						<<std::endl
 						<< "<input.page>    file contains commands and references to various modules (described below)"<<std::endl
 						<< "-d  <depfile>   generated dependency file (for make)" <<std::endl
@@ -807,7 +941,6 @@ int main(int argc, char **argv) {
 						<< "Module: One or more files where the name (without extension) is the same." << std::endl
 						<< "The extension specifies type of resource tied to the module" << std::endl
 						<< "   - <name>.html : part of HTML code" << std::endl
-						<< "   - <name>.htm : part of HTML code" << std::endl
 						<< "   - <name>.css : part of CSS code" << std::endl
 						<< "   - <name>.js : part of JS code" << std::endl
 						<< "   - <name>.hdr : part of HTML code which is put to the header section" << std::endl
@@ -831,6 +964,7 @@ int main(int argc, char **argv) {
 						<< "                       example: '!entry_point main()'" <<std::endl
 						<< "!defer_script yes  - script is loaded with defer flag. " <<std::endl
 						<< "!defer_css yes     - styles are loaded after scripts. " <<std::endl
+						<< "!output name,file  - generates custom output. " <<std::endl
 						<< std::endl
 						<< "In source references" <<std::endl
 						<< std::endl
@@ -844,6 +978,10 @@ int main(int argc, char **argv) {
 						<< "referenced files are also included to the project. However circular" << std::endl
 						<< "references are not allowed resulting to break the cycle once it is detected" << std::endl
 						<< std::endl
+						<< "Custom output"
+						<< std::endl
+						<< "Command '!require @name file' causes that file will be put into custom output file" << std::endl
+						<< std::endl
 						<< "Language" <<std::endl
 						<< std::endl
 						<< "You can use placeholder " << std::endl
@@ -852,6 +990,8 @@ int main(int argc, char **argv) {
 						<< "   {{ns1::ns2::...::text}} "<< std::endl
 						<< "instead of text to refer text in the language file " <<std::endl
 						<< std::endl
+						<< "{{!timestamp}} - insert timestamp" << std::endl
+						<< std::endl
 						<< "Use -G to generate the language file" <<std::endl;
 
 
@@ -859,6 +999,10 @@ int main(int argc, char **argv) {
 		}
 
 		Builder builder;
+
+		if (nooutput && !gen_lang_file.empty()) {
+			std::cerr<<"Warning: No language file will be generated, the flag -G is ignored when -x is active" << std::endl;
+		}
 
 		if (!lang_file.empty()) {
 			try {
@@ -886,10 +1030,10 @@ int main(int argc, char **argv) {
 		if (!nooutput) {
 			if (collapse) builder.collapse_externals();
 			builder.build_output();
-		}
-
-		if (!gen_lang_file.empty()) {
-			builder.gen_lang_file(gen_lang_file);
+			builder.collapse_customs();
+			if (!gen_lang_file.empty()) {
+				builder.gen_lang_file(gen_lang_file);
+			}
 		}
 
 	} catch (std::exception &e) {
