@@ -11,6 +11,8 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <unordered_map>
+#include <algorithm>
 
 #ifdef _WIN32
 	static char path_separator='\\';
@@ -34,6 +36,55 @@
 		return std::string(b,e);
 	}
 
+class OrderedSet {
+public:
+	typedef std::unordered_map<std::string, int> Container;
+	using iterator = Container::iterator;
+	using const_iterator = Container::const_iterator;
+
+	bool push_back(const std::string &item) {
+		return container.insert(std::pair<std::string, int>(item,counter++)).second;
+	}
+	bool exists(const std::string &item) {
+		return container.find(item) != container.end();
+	}
+	iterator begin() {return container.begin();}
+	const_iterator begin() const {return container.begin();}
+	iterator end() {return container.end();}
+	const_iterator end() const {return container.end();}
+
+	std::vector<std::string> getOrdered() const {
+		std::vector<std::string> ret;
+		ret.reserve(container.size());
+		for (auto &&x : container) ret.push_back(x.first);
+
+		std::sort(ret.begin(), ret.end(), [&](const std::string &a, const std::string &b) {
+			return container.find(a)->second < container.find(b)->second;
+		});
+		return ret;
+	}
+
+	void clear() {
+		container.clear();
+		counter = 0;
+	}
+
+
+protected:
+	int counter = 0;
+	Container container;
+
+};
+
+struct PrefixSuffix {
+	std::string prefix;
+	std::string suffix;
+};
+
+static PrefixSuffix html={"<!--","-->"};
+static PrefixSuffix css={"/*","*/"};
+static PrefixSuffix js={"//",""};
+
 
 class Builder {
 public:
@@ -45,15 +96,14 @@ public:
 	void create_dep_file(const std::string &depfile, const std::string &target, bool collapsed, bool phony);
 	void parse_lang_file(const std::string &langfile);
 	void gen_lang_file(const std::string &langfile);
-	void walk_includes(std::vector<std::string> &container, const std::string &fname);
+	void walk_includes(OrderedSet &container, const std::string &fname, const PrefixSuffix &ps);
 	void set_root_dir(const std::string &root_dir);
 	void set_base_name(const std::string &out_file);
-
+	OrderedSet &chooseContainer(OrderedSet & current, const std::string &fname);
 
 
 protected:
-	std::vector<std::string> scripts, styles, templates, header;
-	std::set<std::string> includes;
+	OrderedSet scripts, styles, templates, header;
 	std::map<std::string, std::string> langfile;
 	std::set<std::string> missing_lang;
 	std::string html_name;
@@ -75,7 +125,7 @@ protected:
 	static bool try_ext(const std::string &line, const char *ext, std::string &fullname);
 	void includeFile(std::ostream &out, const std::string &fname);
 
-	void collapse(std::vector<std::string> &block, const std::string &outfile);
+	void collapse(OrderedSet &block, const std::string &outfile);
 	void parse(const std::string &dir, std::istream &input);
 	void build(std::ostream &output);
 	void parse_file(const std::string &fname);
@@ -216,24 +266,24 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			std::string fpath = rel_to_abs(dir,line);
 			bool ok = false;
 			if (try_ext(fpath, ".html", name)) {
-				walk_includes(templates,name);
+				walk_includes(templates,name, html);
 				ok = true;
 			}
 			if (try_ext(fpath, ".htm", name)) {
-				walk_includes(templates,name);
+				walk_includes(templates,name, html);
 				ok = true;
 			}
 			if (try_ext(fpath, ".css", name)) {
 				ok = true;
-				walk_includes(styles, name);
+				walk_includes(styles, name, css);
 			}
 			if (try_ext(fpath, ".js", name)) {
 				ok = true;
-				walk_includes(scripts,name);
+				walk_includes(scripts,name, js);
 			}
 			if (try_ext(fpath, ".hdr", name)) {
 				ok = true;
-				walk_includes(header, name);
+				walk_includes(header, name, html);
 			}
 			if (!ok)
 				throw std::runtime_error("Cannot find module: "+ line + ".*");
@@ -245,11 +295,11 @@ void Builder::build(std::ostream &output) {
 
 	output << "<!DOCTYPE html><html><head>" << std::endl;
 	if (!async_css) {
-		for (auto &&x: styles) {
+		for (auto &&x: styles.getOrdered()) {
 			output << "<link href=\"" << abs_to_rel(root_dir,x) << "\" rel=\"stylesheet\" type=\"text/css\" />" << std::endl;
 		}
 	}
-	for (auto &&x: header) {
+	for (auto &&x: header.getOrdered()) {
 		includeFile(output, x);
 		output << std::endl;
  	}
@@ -260,11 +310,11 @@ void Builder::build(std::ostream &output) {
 
 	output << "<body>"<< std::endl;
 
-	for (auto &&x: templates) {
+	for (auto &&x: templates.getOrdered()) {
 		includeFile(output, x);
 		output << std::endl;
  	}
-	for (auto &&x: scripts) {
+	for (auto &&x: scripts.getOrdered()) {
 		output << "<script "<< (async_script?"defer":"") << " src=\"" << abs_to_rel(root_dir,x) << "\" type=\"text/javascript\"/></script>" << std::endl;
  	}
 	if (async_css || !entry_point.empty()) {
@@ -277,7 +327,7 @@ void Builder::build(std::ostream &output) {
 
 
 			const char *sep = "";
-			for (auto &&x: styles) {
+			for (auto &&x: styles.getOrdered()) {
 				output << sep << '"' << abs_to_rel(root_dir, x) << '"';
 				sep = ",";
 			}
@@ -322,15 +372,15 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 		std::cerr << "Error writing to file: " << depfile << std::endl;
 	} else {
 		f << target << " " <<  depfile << " :";
-		std::initializer_list<const std::vector<std::string> *> list_collapsed{
+		std::initializer_list<OrderedSet *> list_collapsed{
 				&templates, &styles, &scripts, &header,
 		};
-		std::initializer_list<const std::vector<std::string> *> list_debug{
+		std::initializer_list<OrderedSet *> list_debug{
 				&templates, &header,
 		};
 		auto &list=collapsed?list_collapsed:list_debug;
 		for (auto &&y: list ) {
-			for (auto &&x : *y) f << "\\" << std::endl  << x;
+			for (auto &&x : *y) f << "\\" << std::endl  << x.first;
 		}
 		if (!lang_file_name.empty())
 				f << "\\" << std::endl  << lang_file_name;
@@ -338,7 +388,7 @@ void Builder::create_dep_file(const std::string& depfile, const std::string& tar
 		if (phony) {
 			for (auto &&y: list ) {
 				for (auto &&x : *y) {
-					f << std::endl << x << ":" << std::endl;
+					f << std::endl << x.first << ":" << std::endl;
 				}
 			}
 			if (!lang_file_name.empty())
@@ -483,12 +533,12 @@ inline void Builder::parse_lang_file(const std::string& file) {
 	}
 }
 
-void Builder::collapse(std::vector<std::string>& block, const std::string& outfile) {
+void Builder::collapse(OrderedSet& block, const std::string& outfile) {
 	std::ofstream f(outfile, std::ios::trunc|std::ios::out);
 	if (!f) {
 		std::cerr << "Error writing to file: " << outfile << std::endl;
 	} else {
-		for (auto &&x : block) {
+		for (auto &&x : block.getOrdered()) {
 			includeFile(f, x);
 		}
 		f << std::endl;
@@ -564,8 +614,49 @@ void Builder::includeFile(std::ostream& out, const std::string& fname) {
 	}
 }
 
-void Builder::walk_includes(std::vector<std::string> &container, const std::string &fname) {
-	if (includes.insert(fname).second) {
+bool beginsWith(const std::string& subject, const char *test) {
+	auto l = subject.length();
+	auto i = l-l;
+	while (*test && i <l) {
+		if (*test != subject[i]) return false;
+		++i;
+		++test;
+	}
+	return *test == 0;
+}
+
+bool endsWith(const std::string& subject, const char *test) {
+
+	unsigned int cnt = 0;
+	const char *a = test;
+	while (*a) {++a;++cnt;}
+	std::size_t l = (a - test);
+	if (l > subject.length()) return false;
+
+	auto i = subject.length() - (a - test);
+	while (*test) {
+		if (*test != subject[i]) return false;
+		++test;
+		++i;
+	}
+	return true;
+}
+
+OrderedSet &Builder::chooseContainer(OrderedSet & current, const std::string &fname) {
+	if (endsWith(fname,".js")) return scripts;
+	else if (endsWith(fname,".css")) return styles;
+	else if (endsWith(fname,".hdr")) return header;
+	else if (endsWith(fname,".html")) return templates;
+	else if (endsWith(fname,".htm")) return templates;
+	else return current;
+
+}
+
+
+void Builder::walk_includes(OrderedSet &curContainer, const std::string &fname, const PrefixSuffix &ps) {
+	OrderedSet &container = chooseContainer(curContainer, fname);
+
+	if (container.push_back(fname)) {
 		std::ifstream f(fname);
 		if (!f)  {
 			error_reading(fname);
@@ -576,22 +667,13 @@ void Builder::walk_includes(std::vector<std::string> &container, const std::stri
 		while (!!f) {
 			std::getline(f,line);
 			std::string tline(trim(line, isspace));
-			if (checkKw("//!require", tline)) {
-				walk_includes(container, rel_to_abs(dirname(fname), tline));
-			}
-			if (checkKw("/*!require", tline)) {
-				tline = trim(tline.substr(0,tline.length()-2),isspace);
-				walk_includes(container, rel_to_abs(dirname(fname), tline));
-
-			}
-			if (checkKw("<!--!require", tline)) {
-				tline = trim(tline.substr(0,tline.length()-3),isspace);
-				walk_includes(container, rel_to_abs(dirname(fname), tline));
-
+			if (beginsWith(line,ps.prefix.c_str()) && endsWith(line, ps.suffix.c_str())) {
+				line = trim(line.substr(ps.prefix.length(), line.length() - ps.prefix.length() - ps.suffix.length()),isspace);
+				if (checkKw("!require", line)) {
+					walk_includes(container, rel_to_abs(dirname(fname), line), ps);
+				}
 			}
 		}
-
-		container.push_back(fname);
 	}
 
 }
