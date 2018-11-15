@@ -273,14 +273,16 @@ void Builder::parse_file(const std::string &fname) {
 void Builder::parseOutputLine(const std::string &line) {
 	  std::istringstream f(line);
 	  std::string name, fname;
-	  getline(f, name, ',');
-	  getline(f, fname, ',');
+	  getline(f, name, ' ');
+	  getline(f, fname);
 
 	  name = trim(name,isspace);
 	  fname = trim(fname,isspace);
 
 
 	  if (fname.empty()) throw std::runtime_error("Syntax error: !output "+line);
+	  if (name.empty() || name[0] != '@')
+		  throw std::runtime_error("Syntax error: !output - container name must have prefix '@' "+line);
 
 	  std::string extension;
 
@@ -691,8 +693,8 @@ void Builder::translate_file(const SourceContainer *cont, std::ifstream &in, Out
 		std::size_t from = 0;
 		auto p = x.find("{{", from);
 		while (p != x.npos) {
-			p += from;
-			auto q = x.find("}}",p);
+			auto q = x.find("}}",p+2);
+			if (q == x.npos) break;
 			std::string varname = x.substr(p+2,q-2-p);
 			auto l = langfile.find(varname);
 			if (l == langfile.end()) {
@@ -809,13 +811,19 @@ void Builder::walk_includes(SourceContainer &curContainer, std::string fname, bo
 					if (p == line.npos) {
 						throw std::runtime_error("'require' invalid format: "+fname);
 					}
-					std::string name = trim(line.substr(1,p-1),isspace);
+					std::string name = trim(line.substr(0,p),isspace);
+					line = trim(line.substr(p+1),isspace);
+
 					auto s = customContainers.find(name);
 					if (s == customContainers.end()) {
-						throw std::runtime_error("Output file is not defined: "+fname);
+						if (name == "@hdr" || name == "@header") {
+							walk_includes(header, rel_to_abs(dirname(fname), line), true);
+						} else {
+							throw std::runtime_error("Output file is not defined: "+fname);
+						}
+					} else {
+						walk_includes(s->second, rel_to_abs(dirname(fname), line), true);
 					}
-					line = trim(line.substr(p+1),isspace);
-					walk_includes(s->second, rel_to_abs(dirname(fname), line), true);
 				} else {
 					walk_includes(container, rel_to_abs(dirname(fname), line), false);
 				}
