@@ -108,7 +108,19 @@ public:
 	std::string outfile;
 
 	bool detect_require(const std::string &line, std::string &rest) const;
+	bool detect_include(const std::string &line, std::string &rest) const;
+	bool detect_directive(const std::string &line, std::string &rest, const char *directive) const;
 
+
+	bool locked = false;
+	bool lock_container() {
+		if (locked) return false;
+		locked = true;
+		return true;
+	}
+	void unlock_container() {
+		locked = false;
+	}
 };
 
 static PrefixSuffix html={"<!--","-->"};
@@ -164,6 +176,7 @@ protected:
 	void includeFile(const SourceContainer *cont, std::ostream &out, const std::string &fname);
 
 	void collapse(SourceContainer &block, const std::string &outfile);
+	void collapse(SourceContainer &block, std::ostream &outfile);
 	void parse(const std::string &dir, std::istream &input);
 	void build(std::ostream &output);
 	void parse_file(const std::string &fname);
@@ -282,7 +295,7 @@ void Builder::parseOutputLine(const std::string &line) {
 
 	  if (fname.empty()) throw std::runtime_error("Syntax error: !output "+line);
 	  if (name.empty() || name[0] != '@')
-		  throw std::runtime_error("Syntax error: !output - container name must have prefix '@' "+line);
+		  throw std::runtime_error("Syntax error: !container - container name must have prefix '@' "+line);
 
 	  std::string extension;
 
@@ -305,7 +318,7 @@ void Builder::parseOutputLine(const std::string &line) {
 	  SourceContainer cnt(extension, ps);
 	  cnt.outfile  = fname;
 	  if (!customContainers.insert(std::make_pair(name, cnt)).second) {
-		  throw std::runtime_error("Duplicate: !output " + line);
+		  throw std::runtime_error("Duplicate: !container " + line);
 	  }
 
 }
@@ -341,7 +354,7 @@ void Builder::parse(const std::string &dir, std::istream &input) {
 			async_script = line == "true" || line == "yes";
 		} else if (checkKw("!defer_css",line)) {
 			async_css = line == "true" || line == "yes";
-		} else if (checkKw("!output",line)) {
+		} else if (checkKw("!container",line)) {
 			parseOutputLine(line);
 		} else {
 			std::string fpath = rel_to_abs(dir,line);
@@ -443,7 +456,8 @@ void Builder::collapse_customs() {
 
 	for (auto &&c: customContainers) {
 		SourceContainer &cont = c.second;
-		collapse(cont, rel_to_abs(root_dir, cont.outfile));
+		if (cont.outfile[0] != '-')
+			collapse(cont, rel_to_abs(root_dir, cont.outfile));
 	}
 }
 
@@ -690,6 +704,31 @@ void Builder::translate_file(const SourceContainer *cont, std::ifstream &in, Out
 	while (std::getline(in,x)) {
 		if (cont && cont->detect_require(x, tmp))
 			continue;
+		if (cont && cont->detect_include(x, tmp)) {
+			auto s = customContainers.find(tmp);
+			if (s == customContainers.end()) {
+				throw std::runtime_error("Unable to include custom container: "+tmp);
+			}
+			if (!s->second.lock_container() ){
+				throw std::runtime_error("Recursive inclusion is not allowed: "+tmp);
+			}
+			try {
+				for (auto &&x: s->second.getOrdered()) {
+					std::ifstream in(x);
+					if (!in) {
+						error_reading(x);
+					} else {
+						translate_file(cont, in, std::forward<Out>(out));
+					}
+				}
+				s->second.unlock_container();
+			} catch (...) {
+				s->second.unlock_container();
+				throw;
+			}
+
+			continue;
+		}
 		std::size_t from = 0;
 		auto p = x.find("{{", from);
 		while (p != x.npos) {
@@ -773,6 +812,13 @@ SourceContainer  &Builder::chooseContainer(SourceContainer & current, std::strin
 
 
 bool SourceContainer::detect_require(const std::string &line, std::string &rest) const {
+	return detect_directive(line, rest,"!require");
+}
+bool SourceContainer::detect_include(const std::string &line, std::string &rest) const {
+	return detect_directive(line, rest,"!include");
+}
+
+bool SourceContainer::detect_directive(const std::string &line, std::string &rest, const char *directive) const {
 
 	if (line.empty()) return false;
 	if (isspace(line[0])) {
@@ -782,7 +828,7 @@ bool SourceContainer::detect_require(const std::string &line, std::string &rest)
 	if (beginsWith(line,comment_ps.prefix.c_str())
 	  && endsWith(line,comment_ps.suffix.c_str())) {
 		rest = trim(line.substr(comment_ps.prefix.length(), line.length() - comment_ps.prefix.length() - comment_ps.suffix.length()),isspace);
-		if (checkKw("!require", rest)) {
+		if (checkKw(directive, rest)) {
 			return true;
 		}
 	}
@@ -986,7 +1032,8 @@ int main(int argc, char **argv) {
 						<< "                       example: '!entry_point main()'" <<std::endl
 						<< "!defer_script yes  - script is loaded with defer flag. " <<std::endl
 						<< "!defer_css yes     - styles are loaded after scripts. " <<std::endl
-						<< "!output name,file  - generates custom output. " <<std::endl
+						<< "!container @name file  - Creates container which is generated to a file. " <<std::endl
+						<< "!container @name   - Creates container which can be included. " <<std::endl
 						<< std::endl
 						<< "In source references" <<std::endl
 						<< std::endl
@@ -1003,6 +1050,10 @@ int main(int argc, char **argv) {
 						<< "Custom output"
 						<< std::endl
 						<< "Command '!require @name file' causes that file will be put into custom output file" << std::endl
+						<< std::endl
+						<< "Include container to custom output"
+						<< std::endl
+						<< "Command '!include @name' causes that whole container is put to the output" << std::endl
 						<< std::endl
 						<< "Language" <<std::endl
 						<< std::endl

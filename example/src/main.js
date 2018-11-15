@@ -1,4 +1,6 @@
 //!require required1.js
+//!require @custom_page custom_page.html
+//
 
 
 var App = function(){

@@ -4,6 +4,10 @@
 !defer_script yes	
 !entry_point App.start()
 !css style.css
+!container @custom_page custom.html
+!container @custom_page_header -.html
+!container @custom_page_body -.html
+
 
 src/router
 src/lang_{{Langscript::en}}
